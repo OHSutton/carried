@@ -1,20 +1,33 @@
+import { useEffect, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import { View, Text } from 'react-native';
+import { RootNavigator } from './src/navigation/RootNavigator';
+import { initDb } from './src/database/db';
 
 export default function App() {
+  const [dbReady, setDbReady] = useState(false);
+
+  useEffect(() => {
+    try {
+      initDb();
+      setDbReady(true);
+    } catch (e) {
+      console.error("Error initializing DB:", e);
+    }
+  }, []);
+
+  if (!dbReady) {
+    return (
+      <View style={{flex: 1, backgroundColor: '#0F0F0F', justifyContent: 'center', alignItems: 'center'}}>
+        <Text style={{color: '#fff', fontSize: 18}}>Loading Gym App...</Text>
+      </View>
+    );
+  }
+
   return (
-    <View style={styles.container}>
-      <Text>Open up App.tsx to start working on your app!</Text>
-      <StatusBar style="auto" />
-    </View>
+    <>
+      <RootNavigator />
+      <StatusBar style="light" />
+    </>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
