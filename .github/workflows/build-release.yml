@@ -1,0 +1,66 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set up EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      # Build AAB (production profile — for Play Store)
+      - name: Build AAB on EAS
+        run: |
+          eas build --platform android --profile production --non-interactive --wait --json > aab-build.json
+          cat aab-build.json
+
+      - name: Download AAB
+        run: |
+          AAB_URL=$(jq -r '.[0].artifacts.buildUrl' aab-build.json)
+          curl -L -o carried-${{ steps.version.outputs.VERSION }}.aab "$AAB_URL"
+
+      # Build APK (preview profile — for sideloading)
+      - name: Build APK on EAS
+        run: |
+          eas build --platform android --profile preview --non-interactive --wait --json > apk-build.json
+          cat apk-build.json
+
+      - name: Download APK
+        run: |
+          APK_URL=$(jq -r '.[0].artifacts.buildUrl' apk-build.json)
+          curl -L -o carried-${{ steps.version.outputs.VERSION }}.apk "$APK_URL"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Carried v${{ steps.version.outputs.VERSION }}
+          generate_release_notes: true
+          files: |
+            carried-${{ steps.version.outputs.VERSION }}.apk
+            carried-${{ steps.version.outputs.VERSION }}.aab
