@@ -3,6 +3,7 @@ import { StatusBar } from 'expo-status-bar';
 import { View, Text } from 'react-native';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { initDb } from './src/database/db';
+import { refreshScheduledGymDayNotification } from './src/database/queries';
 
 export default function App() {
   const [dbReady, setDbReady] = useState(false);
@@ -10,6 +11,7 @@ export default function App() {
   useEffect(() => {
     try {
       initDb();
+      void refreshScheduledGymDayNotification();
       setDbReady(true);
     } catch (e) {
       console.error("Error initializing DB:", e);

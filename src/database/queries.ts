@@ -50,6 +50,74 @@ export const setConfig = (key: string, value: string) => {
   } catch(e) {}
 };
 
+const computeNextWorkoutDate = (lastSessionMs: number | null, notifSetting: string): Date | null => {
+  if (notifSetting === 'never' || !lastSessionMs) return null;
+
+  const lastDate = new Date(lastSessionMs);
+  lastDate.setHours(0, 0, 0, 0);
+  const targetDate = new Date(lastDate);
+
+  if (notifSetting === 'alternating') {
+    targetDate.setDate(targetDate.getDate() + 2);
+  } else if (notifSetting === 'mwf') {
+    const dayOfWeek = targetDate.getDay();
+    let daysToAdd = 1;
+    if (dayOfWeek === 1) daysToAdd = 2;
+    else if (dayOfWeek === 2) daysToAdd = 1;
+    else if (dayOfWeek === 3) daysToAdd = 2;
+    else if (dayOfWeek === 4) daysToAdd = 1;
+    else if (dayOfWeek === 5) daysToAdd = 3;
+    else if (dayOfWeek === 6) daysToAdd = 2;
+    else if (dayOfWeek === 0) daysToAdd = 1;
+    targetDate.setDate(targetDate.getDate() + daysToAdd);
+  } else {
+    targetDate.setDate(targetDate.getDate() + 1);
+  }
+
+  targetDate.setHours(5, 0, 0, 0);
+  return targetDate;
+};
+
+export const refreshScheduledGymDayNotification = async () => {
+  const active = getActivePlan();
+  if (!active) {
+    await cancelScheduledGymDayNotifications();
+    return;
+  }
+
+  let routines: number[] = [];
+  try {
+    routines = JSON.parse(active.routines);
+  } catch (e) {}
+
+  if (routines.length === 0) {
+    await cancelScheduledGymDayNotifications();
+    return;
+  }
+
+  const notifSetting = getConfig('notification_frequency', 'never');
+  const nextWorkoutDate = computeNextWorkoutDate(getLastSessionTime(), notifSetting);
+  if (!nextWorkoutDate) {
+    await cancelScheduledGymDayNotifications();
+    return;
+  }
+
+  const routineId = routines[active.current_routine_index] ?? routines[0];
+  const nextRoutine = getTemplates().find((t) => t.id === routineId);
+  if (!nextRoutine) {
+    await cancelScheduledGymDayNotifications();
+    return;
+  }
+
+  const now = new Date();
+  if (nextWorkoutDate.getTime() <= now.getTime()) {
+    await cancelScheduledGymDayNotifications();
+    return;
+  }
+
+  await scheduleGymDayNotification(`Gym Day: ${active.name}`, `Up Next: ${nextRoutine.name}!`, nextWorkoutDate);
+};
+
 export const resetDatabase = () => {
   db.runSync('DROP TABLE IF EXISTS App_Config');
   db.runSync('DROP TABLE IF EXISTS Body_Weight_Entries');
@@ -60,10 +128,11 @@ export const resetDatabase = () => {
   db.runSync('DROP TABLE IF EXISTS Plans');
   initDb();
   // We can seed exercises if the user wants default schema
-  addExercise('Bench Press', 'weight', '["Chest", "Triceps", "Front Delts"]');
-  addExercise('Squat', 'weight', '["Quads", "Glutes", "Lower Back"]');
-  addExercise('Deadlift', 'weight', '["Lower Back", "Hamstrings", "Traps"]');
-  addExercise('Pull Up', 'weight', '["Lats", "Biceps", "Upper Back"]');
+  addExercise('Bench Press', 'weight', '', '["Chest", "Triceps", "Front Delts"]');
+  addExercise('Squat', 'weight', '', '["Quads", "Glutes", "Lower Back"]');
+  addExercise('Deadlift', 'weight', '', '["Lower Back", "Hamstrings", "Traps"]');
+  addExercise('Pull Up', 'weight', '', '["Lats", "Biceps", "Upper Back"]');
+  void cancelScheduledGymDayNotifications();
 };
 
 // Exercises
@@ -75,8 +144,8 @@ export const addExercise = (name: string, type: 'weight' | 'time', notes: string
   return db.runSync('INSERT INTO Exercises (name, type, notes, muscles, rest_time) VALUES (?, ?, ?, ?, ?)', [name, type, notes, musclesStr, rest_time]);
 };
 
-export const updateExercise = (id: number, name: string, type: string, musclesStr: string = '[]', rest_time: number = 0) => {
-  return db.runSync('UPDATE Exercises SET name = ?, type = ?, muscles = ?, rest_time = ? WHERE id = ?', [name, type, musclesStr, rest_time, id]);
+export const updateExercise = (id: number, name: string, type: string, notes: string = '', musclesStr: string = '[]', rest_time: number = 0) => {
+  return db.runSync('UPDATE Exercises SET name = ?, type = ?, notes = ?, muscles = ?, rest_time = ? WHERE id = ?', [name, type, notes, musclesStr, rest_time, id]);
 };
 
 import { INITIAL_EXERCISES } from './seedData';
@@ -85,9 +154,9 @@ export const resetExercises = () => {
     const placeholders = defaultNames.map(() => '?').join(',');
     db.runSync(`DELETE FROM Exercises WHERE name NOT IN (${placeholders})`, defaultNames);
 
-    const stmt = db.prepareSync('UPDATE Exercises SET type = ?, muscles = ?, rest_time = ? WHERE name = ?');
+    const stmt = db.prepareSync('UPDATE Exercises SET type = ?, notes = ?, muscles = ?, rest_time = ? WHERE name = ?');
     for (const ex of INITIAL_EXERCISES) {
-        stmt.executeSync([ex.type, JSON.stringify(ex.muscles.sort()), 0, ex.name]);
+        stmt.executeSync([ex.type, ex.notes || '', JSON.stringify(ex.muscles.sort()), 0, ex.name]);
     }
     stmt.finalizeSync();
 
@@ -132,15 +201,21 @@ export const getActivePlan = (): Plan | null => {
 };
 
 export const addPlan = (name: string, routinesStr: string, frequency_type: string, frequency_data: string) => {
-  return db.runSync('INSERT INTO Plans (name, routines, frequency_type, frequency_data) VALUES (?, ?, ?, ?)', [name, routinesStr, frequency_type, frequency_data]);
+  const result = db.runSync('INSERT INTO Plans (name, routines, frequency_type, frequency_data) VALUES (?, ?, ?, ?)', [name, routinesStr, frequency_type, frequency_data]);
+  void refreshScheduledGymDayNotification();
+  return result;
 };
 
 export const updatePlan = (id: number, name: string, routinesStr: string, frequency_type: string, frequency_data: string) => {
-  return db.runSync('UPDATE Plans SET name = ?, routines = ?, frequency_type = ?, frequency_data = ? WHERE id = ?', [name, routinesStr, frequency_type, frequency_data, id]);
+  const result = db.runSync('UPDATE Plans SET name = ?, routines = ?, frequency_type = ?, frequency_data = ? WHERE id = ?', [name, routinesStr, frequency_type, frequency_data, id]);
+  void refreshScheduledGymDayNotification();
+  return result;
 };
 
 export const deletePlan = (id: number) => {
-  return db.runSync('DELETE FROM Plans WHERE id = ?', [id]);
+  const result = db.runSync('DELETE FROM Plans WHERE id = ?', [id]);
+  void refreshScheduledGymDayNotification();
+  return result;
 };
 
 export const setActivePlan = (id: number | null) => {
@@ -148,6 +223,7 @@ export const setActivePlan = (id: number | null) => {
   if (id !== null) {
       db.runSync('UPDATE Plans SET is_active = 1 WHERE id = ?', [id]);
   }
+  void refreshScheduledGymDayNotification();
 };
 
 export const advanceActivePlan = () => {
@@ -166,46 +242,7 @@ export const advanceActivePlan = () => {
     }
     db.runSync('UPDATE Plans SET current_routine_index = ? WHERE id = ?', [nextIndex, active.id]);
 
-    // Notification Scheduling
-    const nextRoutineId = routines[nextIndex];
-    const nextRoutine = getTemplates().find(t => t.id === nextRoutineId);
-    if (!nextRoutine) return;
-
-    const notifSetting = getConfig('notification_frequency', 'never');
-    if (notifSetting === 'never') return;
-
-    const now = new Date();
-    let targetDate = new Date(now);
-
-    if (notifSetting === 'alternating') {
-        // Skip one day for rest, target the day after
-        targetDate.setDate(targetDate.getDate() + 2);
-    } else if (notifSetting === 'mwf') {
-        const dayOfWeek = targetDate.getDay(); // 0 = Sun, 1 = Mon ...
-        let daysToAdd = 1;
-        if (dayOfWeek === 1) daysToAdd = 2;      // Mon -> Wed
-        else if (dayOfWeek === 2) daysToAdd = 1; // Tue -> Wed
-        else if (dayOfWeek === 3) daysToAdd = 2; // Wed -> Fri
-        else if (dayOfWeek === 4) daysToAdd = 1; // Thu -> Fri
-        else if (dayOfWeek === 5) daysToAdd = 3; // Fri -> Mon
-        else if (dayOfWeek === 6) daysToAdd = 2; // Sat -> Mon
-        else if (dayOfWeek === 0) daysToAdd = 1; // Sun -> Mon
-        
-        targetDate.setDate(targetDate.getDate() + daysToAdd);
-    } else {
-        // Fallback default: Tomorrow
-        targetDate.setDate(targetDate.getDate() + 1);
-    }
-    
-    // Always dispatch at exactly 5:00 AM local time
-    targetDate.setHours(5, 0, 0, 0);
-
-    // Fallback if calculated targetDate is somehow in the past
-    if (targetDate.getTime() <= now.getTime()) {
-        targetDate.setDate(targetDate.getDate() + 1);
-    }
-    
-    scheduleGymDayNotification(`Gym Day: ${active.name}`, `Up Next: ${nextRoutine.name}!`, targetDate);
+    void refreshScheduledGymDayNotification();
 };
 
 // Sessions & Sets
@@ -216,6 +253,7 @@ export const startSession = (templateId: number | null): number => {
 
 export const endSession = (sessionId: number, durationSec: number) => {
   db.runSync('UPDATE Sessions SET end_time = ?, duration = ? WHERE id = ?', [Date.now(), durationSec, sessionId]);
+  void refreshScheduledGymDayNotification();
 };
 
 export const addSet = (sessionId: number, exerciseId: number, repCount: number, weight: number, duration: number, order: number) => {
@@ -234,6 +272,7 @@ export const deleteSession = (sessionId: number) => {
 export const resetHistory = () => {
     db.runSync('DELETE FROM Sets');
     db.runSync('DELETE FROM Sessions');
+    void refreshScheduledGymDayNotification();
 };
 
 export const getSessions = (): any[] => {

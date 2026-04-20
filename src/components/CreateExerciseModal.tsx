@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, TextInput, ScrollView, Modal, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, TextInput, ScrollView, Modal, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
 import { X, Dumbbell, Timer } from 'lucide-react-native';
 
 const MUSCLE_OPTIONS = [
@@ -40,8 +40,12 @@ export const CreateExerciseModal: React.FC<CreateExerciseModalProps> = ({
   };
 
   return (
-    <Modal visible={visible} animationType="fade" transparent>
+    <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
       <View style={styles.modalOverlaySecondary}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalKeyboardAvoiding}
+        >
         <View style={[styles.modalContent, { maxHeight: '75%' }]}>
           <View style={styles.modalHeaderRow}>
             <Text style={styles.modalTitle}>{isEditing ? 'Edit Exercise' : 'New Exercise'}</Text>
@@ -106,6 +110,7 @@ export const CreateExerciseModal: React.FC<CreateExerciseModalProps> = ({
             </View>
           </ScrollView>
         </View>
+        </KeyboardAvoidingView>
       </View>
     </Modal>
   );
@@ -125,6 +130,10 @@ const styles = StyleSheet.create({
     padding: 24,
     maxHeight: '90%',
   },
+  modalKeyboardAvoiding: {
+    flex: 1,
+    justifyContent: 'center',
+  },
   modalHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -138,9 +147,9 @@ const styles = StyleSheet.create({
   },
   headerSaveButton: {
     backgroundColor: '#00E5FF',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
   },
   headerSaveText: { color: '#000', fontWeight: '700', fontSize: 14 },
   modalTitle: { color: '#FFF', fontSize: 24, fontWeight: 'bold' },

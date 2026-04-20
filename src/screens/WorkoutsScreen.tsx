@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView, Alert, Modal } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView, Alert, Modal, KeyboardAvoidingView, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { formatRest } from '../utils/time';
 import { CreateExerciseModal } from '../components/CreateExerciseModal';
@@ -10,7 +10,7 @@ import {
     getConfig, setConfig,
     UserTemplate, Exercise, Plan
 } from '../database/queries';
-import { Play, Trash2, Plus, Search, X, Edit2, Dumbbell, Timer, TimerOff, CheckCircle2, Navigation, ChevronUp, ChevronDown, Bell } from 'lucide-react-native';
+import { Play, Trash2, Plus, Search, X, Edit2, Dumbbell, Timer, TimerOff, CheckCircle2, Navigation, ChevronUp, ChevronDown, Bell, FileText } from 'lucide-react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSessionStore } from '../store/sessionStore';
 
@@ -34,6 +34,9 @@ export const WorkoutsScreen = () => {
     const [selectedBuilderExercises, setSelectedBuilderExercises] = useState<any[]>([]);
     const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
+    const [notesModalVisible, setNotesModalVisible] = useState(false);
+    const [editingNotesExerciseId, setEditingNotesExerciseId] = useState<number | null>(null);
+    const [notesDraft, setNotesDraft] = useState('');
 
     // Create Exercise Form State
     const [createExerciseModal, setCreateExerciseModal] = useState(false);
@@ -63,12 +66,37 @@ export const WorkoutsScreen = () => {
         React.useCallback(() => { loadData(); }, [])
     );
 
+    const buildTemplateExercise = (exercise: Exercise, overrides: any = {}) => ({
+        exerciseId: exercise.id,
+        name: exercise.name,
+        type: exercise.type,
+        sets: '3',
+        reps: exercise.type === 'weight' ? '10' : '',
+        ...overrides,
+        notes: overrides.notes ?? exercise.notes ?? '',
+        rest_time: (overrides.rest_time ?? exercise.rest_time ?? 0).toString(),
+    });
+
+    const hydrateTemplateExercise = (item: any) => {
+        const exercise = allExercises.find((ex) => ex.id === item.exerciseId);
+        if (!exercise) {
+            return {
+                ...item,
+                notes: item.notes ?? '',
+                rest_time: (item.rest_time ?? 0).toString(),
+            };
+        }
+        return buildTemplateExercise(exercise, item);
+    };
+
     // --- TEMPLATE LOGIC ---
     const openCreateTemplateModal = () => {
         setNewTemplateName('');
         setSelectedBuilderExercises([]);
         setEditingTemplateId(null);
         setSearchQuery('');
+        setEditingNotesExerciseId(null);
+        setNotesDraft('');
         setHasUnsavedChanges(false);
         setTemplatesModalVisible(true);
     };
@@ -76,8 +104,10 @@ export const WorkoutsScreen = () => {
     const openEditTemplateModal = (template: UserTemplate) => {
         setEditingTemplateId(template.id);
         setNewTemplateName(template.name);
-        try { setSelectedBuilderExercises(JSON.parse(template.exercises)); } catch (e) { setSelectedBuilderExercises([]); }
+        try { setSelectedBuilderExercises(JSON.parse(template.exercises).map((item: any) => hydrateTemplateExercise(item))); } catch (e) { setSelectedBuilderExercises([]); }
         setSearchQuery('');
+        setEditingNotesExerciseId(null);
+        setNotesDraft('');
         setHasUnsavedChanges(false);
         setTemplatesModalVisible(true);
     };
@@ -110,7 +140,7 @@ export const WorkoutsScreen = () => {
 
     const handleSelectBuilderExercise = (ex: Exercise) => {
         if (!selectedBuilderExercises.find(s => s.exerciseId === ex.id)) {
-            setSelectedBuilderExercises([...selectedBuilderExercises, { exerciseId: ex.id, name: ex.name, type: ex.type, sets: '3', reps: ex.type === 'weight' ? '10' : '', rest_time: (ex.rest_time ?? 0).toString() }]);
+            setSelectedBuilderExercises([...selectedBuilderExercises, buildTemplateExercise(ex)]);
             setHasUnsavedChanges(true);
         }
         setSearchQuery('');
@@ -137,6 +167,42 @@ export const WorkoutsScreen = () => {
         [items[index], items[index + 1]] = [items[index + 1], items[index]];
         setSelectedBuilderExercises(items);
         setHasUnsavedChanges(true);
+    };
+
+    const openExerciseNotesEditor = (exerciseId: number) => {
+        const targetExercise = selectedBuilderExercises.find((item) => item.exerciseId === exerciseId);
+        setEditingNotesExerciseId(exerciseId);
+        setNotesDraft(targetExercise?.notes || '');
+        setNotesModalVisible(true);
+    };
+
+    const handleSaveExerciseNotes = () => {
+        if (editingNotesExerciseId === null) return;
+        const targetExercise = allExercises.find((exercise) => exercise.id === editingNotesExerciseId);
+        if (!targetExercise) return;
+
+        updateExercise(
+            targetExercise.id,
+            targetExercise.name,
+            targetExercise.type,
+            notesDraft.trim(),
+            targetExercise.muscles,
+            targetExercise.rest_time ?? 0,
+        );
+
+        const refreshedExercises = getExercises();
+        setAllExercises(refreshedExercises);
+        setSelectedBuilderExercises((prev) =>
+            prev.map((item) =>
+                item.exerciseId === editingNotesExerciseId
+                    ? { ...item, notes: notesDraft.trim() }
+                    : item,
+            ),
+        );
+        setHasUnsavedChanges(true);
+        setNotesModalVisible(false);
+        setEditingNotesExerciseId(null);
+        setNotesDraft('');
     };
 
     const movePlanRoutineUp = (index: number) => {
@@ -197,7 +263,7 @@ export const WorkoutsScreen = () => {
 
     const submitCreateExercise = (name: string, type: 'weight' | 'time', muscles: string[]) => {
         if (!name.trim()) return;
-        if (editingLibExerciseId) updateExercise(editingLibExerciseId, name.trim(), type, JSON.stringify(muscles), 0);
+        if (editingLibExerciseId) updateExercise(editingLibExerciseId, name.trim(), type, '', JSON.stringify(muscles), 0);
         else addExercise(name.trim(), type, '', JSON.stringify(muscles), 0);
         setAllExercises(getExercises());
         const newlyCreated = getExercises().find((e) => e.name === name.trim());
@@ -236,8 +302,8 @@ export const WorkoutsScreen = () => {
                                         {isActivePlan ? '★ ACTIVE PLAN' : 'Tap to set as Active Plan'}
                                     </Text>
                                 </TouchableOpacity>
-                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-                                    <TouchableOpacity onPress={() => openEditPlanModal(item)}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                                    <TouchableOpacity onPress={() => openEditPlanModal(item)} style={styles.cardEditBtn}>
                                         <Edit2 color="#A0A0A0" size={20} />
                                     </TouchableOpacity>
                                     <TouchableOpacity onPress={() => handleDeletePlan(item.id)}>
@@ -273,8 +339,8 @@ export const WorkoutsScreen = () => {
                                     <Text style={styles.templateName}>{item.name}</Text>
                                     {musclesArr.length > 0 && <Text style={styles.templateMuscles} numberOfLines={1}>{musclesArr.join(' • ')}</Text>}
                                 </View>
-                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-                                    <TouchableOpacity onPress={() => openEditTemplateModal(item)}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                                    <TouchableOpacity onPress={() => openEditTemplateModal(item)} style={styles.cardEditBtn}>
                                         <Edit2 color="#A0A0A0" size={20} />
                                     </TouchableOpacity>
                                     <TouchableOpacity onPress={() => handleDeleteTemplate(item.id)}>
@@ -288,8 +354,12 @@ export const WorkoutsScreen = () => {
             </ScrollView>
 
             {/* ROUTINE MODAL */}
-            <Modal visible={templatesModalVisible} animationType="slide" transparent>
+            <Modal visible={templatesModalVisible} animationType="slide" transparent onRequestClose={handleCloseTemplateModal}>
                 <View style={styles.modalOverlay}>
+                    <KeyboardAvoidingView
+                        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                        style={styles.modalKeyboardAvoiding}
+                    >
                     <View style={styles.modalContent}>
                         <View style={styles.modalHeaderRow}>
                             <Text style={styles.modalTitle}>{editingTemplateId ? 'Edit Routine' : 'Build Routine'}</Text>
@@ -332,7 +402,11 @@ export const WorkoutsScreen = () => {
                                             <TouchableOpacity style={{ flex: 1 }} onPress={() => handleSelectBuilderExercise(item)}>
                                                 <Text style={styles.exerciseSelectName}>{item.name}</Text>
                                             </TouchableOpacity>
-                                            <TouchableOpacity onPress={() => handleSelectBuilderExercise(item)}>
+                                            <TouchableOpacity
+                                                onPress={() => handleSelectBuilderExercise(item)}
+                                                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                                                style={styles.exerciseSelectIconBtn}
+                                            >
                                                 <Plus color="#00E5FF" size={24} />
                                             </TouchableOpacity>
                                         </View>
@@ -346,31 +420,37 @@ export const WorkoutsScreen = () => {
                                 <View style={styles.selectedWrapper}>
                                     {selectedBuilderExercises.map((sel, idx) => (
                                         <View key={sel.exerciseId} style={styles.compactExerciseCard}>
-                                            <View style={styles.compactExerciseNumberBadge}>
-                                                <Text style={styles.compactExerciseIndex}>{idx + 1}</Text>
+                                            <View style={styles.compactReorderColumn}>
+                                                <TouchableOpacity
+                                                    onPress={() => moveBuilderUp(idx)}
+                                                    style={[styles.compactIconBtn, idx === 0 && styles.compactIconBtnDisabled]}
+                                                    disabled={idx === 0}
+                                                >
+                                                    <ChevronUp color={idx === 0 ? '#5A5A5D' : '#A0A0A0'} size={18} />
+                                                </TouchableOpacity>
+                                                <View style={styles.compactControlDivider} />
+                                                <TouchableOpacity
+                                                    onPress={() => moveBuilderDown(idx)}
+                                                    style={[styles.compactIconBtn, idx === selectedBuilderExercises.length - 1 && styles.compactIconBtnDisabled]}
+                                                    disabled={idx === selectedBuilderExercises.length - 1}
+                                                >
+                                                    <ChevronDown color={idx === selectedBuilderExercises.length - 1 ? '#5A5A5D' : '#A0A0A0'} size={18} />
+                                                </TouchableOpacity>
                                             </View>
                                             <View style={styles.compactExerciseBody}>
                                                 <View style={styles.compactExerciseTitleRow}>
+                                                    <View style={styles.compactExerciseNumberBadge}>
+                                                        <Text style={styles.compactExerciseIndex}>{idx + 1}</Text>
+                                                    </View>
                                                     <Text style={styles.compactExerciseName}>{sel.name}</Text>
                                                 </View>
                                                 <View style={styles.compactExerciseMetaRow}>
-                                                    <View style={styles.compactControlGroup}>
-                                                        <TouchableOpacity
-                                                            onPress={() => moveBuilderUp(idx)}
-                                                            style={[styles.compactIconBtn, idx === 0 && styles.compactIconBtnDisabled]}
-                                                            disabled={idx === 0}
-                                                        >
-                                                            <ChevronUp color={idx === 0 ? '#5A5A5D' : '#A0A0A0'} size={18} />
-                                                        </TouchableOpacity>
-                                                        <View style={styles.compactControlDivider} />
-                                                        <TouchableOpacity
-                                                            onPress={() => moveBuilderDown(idx)}
-                                                            style={[styles.compactIconBtn, idx === selectedBuilderExercises.length - 1 && styles.compactIconBtnDisabled]}
-                                                            disabled={idx === selectedBuilderExercises.length - 1}
-                                                        >
-                                                            <ChevronDown color={idx === selectedBuilderExercises.length - 1 ? '#5A5A5D' : '#A0A0A0'} size={18} />
-                                                        </TouchableOpacity>
-                                                    </View>
+                                                    <TouchableOpacity
+                                                        style={[styles.compactNotesBtn, !!sel.notes?.trim() && styles.compactNotesBtnActive]}
+                                                        onPress={() => openExerciseNotesEditor(sel.exerciseId)}
+                                                    >
+                                                        <FileText color={sel.notes?.trim() ? '#00E5FF' : '#6F6F74'} size={16} />
+                                                    </TouchableOpacity>
                                                     <View style={styles.compactStatGroup}>
                                                         <Text style={styles.compactStatLabel}>Sets</Text>
                                                         <TextInput
@@ -398,12 +478,17 @@ export const WorkoutsScreen = () => {
                             )}
                         </ScrollView>
                     </View>
+                    </KeyboardAvoidingView>
                 </View>
             </Modal>
 
             {/* PLAN MODAL */}
-            <Modal visible={plansModalVisible} animationType="slide" transparent>
+            <Modal visible={plansModalVisible} animationType="slide" transparent onRequestClose={() => setPlansModalVisible(false)}>
                 <View style={styles.modalOverlay}>
+                    <KeyboardAvoidingView
+                        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                        style={styles.modalKeyboardAvoiding}
+                    >
                     <View style={styles.modalContent}>
                         <View style={styles.modalHeaderRow}>
                             <Text style={styles.modalTitle}>{editingPlanId ? 'Edit Plan' : 'Build Plan'}</Text>
@@ -446,11 +531,19 @@ export const WorkoutsScreen = () => {
                                                 <View style={styles.targetHeader}>
                                                     <Text style={styles.targetRowName}>{idx + 1}. {rName}</Text>
                                                     <View style={styles.targetControls}>
-                                                        <TouchableOpacity onPress={() => movePlanRoutineUp(idx)} style={styles.iconBtnTight}>
-                                                            <ChevronUp color="#FFF" size={22} />
+                                                        <TouchableOpacity
+                                                            onPress={() => movePlanRoutineUp(idx)}
+                                                            style={[styles.iconBtnTight, idx === 0 && styles.iconBtnDisabled]}
+                                                            disabled={idx === 0}
+                                                        >
+                                                            <ChevronUp color={idx === 0 ? '#5A5A5D' : '#FFF'} size={22} />
                                                         </TouchableOpacity>
-                                                        <TouchableOpacity onPress={() => movePlanRoutineDown(idx)} style={styles.iconBtnTight}>
-                                                            <ChevronDown color="#FFF" size={22} />
+                                                        <TouchableOpacity
+                                                            onPress={() => movePlanRoutineDown(idx)}
+                                                            style={[styles.iconBtnTight, idx === newPlanRoutines.length - 1 && styles.iconBtnDisabled]}
+                                                            disabled={idx === newPlanRoutines.length - 1}
+                                                        >
+                                                            <ChevronDown color={idx === newPlanRoutines.length - 1 ? '#5A5A5D' : '#FFF'} size={22} />
                                                         </TouchableOpacity>
                                                         <TouchableOpacity onPress={() => {
                                                             const items = [...newPlanRoutines];
@@ -468,6 +561,7 @@ export const WorkoutsScreen = () => {
                             )}
                         </ScrollView>
                     </View>
+                    </KeyboardAvoidingView>
                 </View>
             </Modal>
             
@@ -505,11 +599,55 @@ export const WorkoutsScreen = () => {
                 </View>
             </Modal>
 
+            <Modal visible={notesModalVisible} animationType="slide" transparent onRequestClose={() => {
+                setNotesModalVisible(false);
+                setEditingNotesExerciseId(null);
+                setNotesDraft('');
+            }}>
+                <View style={styles.modalOverlay}>
+                    <KeyboardAvoidingView
+                        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                        style={styles.modalKeyboardAvoiding}
+                    >
+                    <View style={styles.modalContent}>
+                        <View style={styles.modalHeaderRow}>
+                            <Text style={styles.modalTitle}>Exercise Notes</Text>
+                            <View style={{ flexDirection: 'row', gap: 16, alignItems: 'center' }}>
+                                <TouchableOpacity style={styles.primaryActionBtn} onPress={handleSaveExerciseNotes}>
+                                    <Text style={styles.primaryActionText}>Save</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    onPress={() => {
+                                        setNotesModalVisible(false);
+                                        setEditingNotesExerciseId(null);
+                                        setNotesDraft('');
+                                    }}
+                                >
+                                    <X color="#FFF" size={28} />
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                        <TextInput
+                            style={[styles.input, styles.notesInput]}
+                            placeholder="Add any cues, setup reminders, or technique notes..."
+                            placeholderTextColor="#666"
+                            value={notesDraft}
+                            onChangeText={setNotesDraft}
+                            multiline
+                            textAlignVertical="top"
+                            autoFocus
+                        />
+                    </View>
+                    </KeyboardAvoidingView>
+                </View>
+            </Modal>
+
             {/* Create Exercise Modal */}
             <CreateExerciseModal 
                 visible={createExerciseModal}
                 onClose={() => setCreateExerciseModal(false)}
                 onSubmit={submitCreateExercise}
+                initialName={searchQuery.trim()}
                 isEditing={!!editingLibExerciseId}
             />
         </View>
@@ -530,10 +668,12 @@ const styles = StyleSheet.create({
     templateCard: { backgroundColor: '#1C1C1E', borderRadius: 16, padding: 20, marginBottom: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderLeftWidth: 4, borderLeftColor: '#444' },
     planCard: { backgroundColor: '#1C1C1E', borderRadius: 16, padding: 20, marginBottom: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderLeftWidth: 4, borderLeftColor: '#8844FF' },
     planCardActive: { borderLeftColor: '#00E5FF', backgroundColor: 'rgba(0,229,255,0.05)' },
+    cardEditBtn: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: '#2A2A2D' },
     templateName: { color: '#FFF', fontSize: 20, fontWeight: 'bold' },
     templateMuscles: { color: '#00E5FF', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.8 },
     
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'flex-end' },
+    modalKeyboardAvoiding: { flex: 1, justifyContent: 'flex-end' },
     modalContent: { backgroundColor: '#1C1C1E', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: '90%' },
     modalOverlaySecondary: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', padding: 20 },
     modalHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
@@ -545,13 +685,14 @@ const styles = StyleSheet.create({
     input: { backgroundColor: '#2C2C2E', color: '#FFF', borderRadius: 12, padding: 16, fontSize: 16, marginBottom: 24 },
     builderSectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 12 },
     sectionLabel: { color: '#A0A0A0', fontSize: 14, fontWeight: 'bold', textTransform: 'uppercase', flex: 1 },
-    inlineCreateBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, backgroundColor: 'rgba(0,229,255,0.08)', borderWidth: 1, borderColor: 'rgba(0,229,255,0.22)' },
+    inlineCreateBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, backgroundColor: 'rgba(0,229,255,0.08)', borderWidth: 1, borderColor: 'rgba(0,229,255,0.22)' },
     inlineCreateBtnText: { color: '#00E5FF', fontSize: 13, fontWeight: '700' },
     searchBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#2C2C2E', borderRadius: 12, paddingHorizontal: 16 },
     searchInput: { flex: 1, color: '#FFF', paddingVertical: 16, marginLeft: 12, fontSize: 16 },
     autocompleteContainer: { backgroundColor: '#2C2C2E', borderRadius: 12, padding: 8, marginBottom: 24 },
     exerciseSelectRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: '#3C3C3E' },
     exerciseSelectName: { color: '#FFF', fontSize: 16 },
+    exerciseSelectIconBtn: { minWidth: 40, minHeight: 40, alignItems: 'center', justifyContent: 'center', marginRight: -4 },
     
     selectedWrapper: { marginTop: 16 },
     targetRow: { backgroundColor: '#2C2C2E', borderRadius: 12, padding: 16, marginBottom: 12 },
@@ -559,28 +700,32 @@ const styles = StyleSheet.create({
     targetRowName: { color: '#FFF', fontSize: 16, fontWeight: 'bold', flex: 1 },
     targetControls: { flexDirection: 'row', gap: 8 },
     iconBtnTight: { padding: 4 },
+    iconBtnDisabled: { opacity: 0.55 },
     targetInputsRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
     smallInput: { backgroundColor: '#1C1C1E', color: '#FFF', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, width: 60, textAlign: 'center', fontSize: 16 },
     inputLabel: { color: '#A0A0A0', fontSize: 14, fontWeight: 'bold' },
-    compactExerciseCard: { backgroundColor: '#202022', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 12, marginBottom: 8, flexDirection: 'row', gap: 12, alignItems: 'center' },
-    compactExerciseNumberBadge: { width: 34, height: 34, borderRadius: 17, backgroundColor: 'rgba(0,229,255,0.14)', alignItems: 'center', justifyContent: 'center', alignSelf: 'center', borderWidth: 1, borderColor: 'rgba(0,229,255,0.24)' },
+    compactExerciseCard: { backgroundColor: '#202022', borderRadius: 16, paddingHorizontal: 14, paddingVertical: 12, marginBottom: 8, flexDirection: 'row', gap: 12, alignItems: 'stretch' },
+    compactReorderColumn: { width: 34, borderRadius: 12, backgroundColor: '#161618', alignItems: 'center', justifyContent: 'center', paddingVertical: 4, flexShrink: 0 },
+    compactExerciseNumberBadge: { width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(0,229,255,0.14)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(0,229,255,0.24)', flexShrink: 0 },
     compactExerciseBody: { flex: 1, gap: 10, minHeight: 68, justifyContent: 'center' },
-    compactExerciseTitleRow: { flexDirection: 'row', alignItems: 'flex-start' },
+    compactExerciseTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     compactExerciseIndex: { color: '#00E5FF', fontSize: 12, fontWeight: '800', textAlign: 'center' },
     compactExerciseName: { color: '#FFF', fontSize: 15, fontWeight: '600', flex: 1, lineHeight: 20 },
-    compactExerciseMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
-    compactControlGroup: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#161618', borderRadius: 10, paddingHorizontal: 4, paddingVertical: 4 },
+    compactNotesBtn: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: '#161618', borderWidth: 1, borderColor: '#242428', flexShrink: 0 },
+    compactNotesBtnActive: { borderColor: 'rgba(0,229,255,0.35)', backgroundColor: 'rgba(0,229,255,0.08)' },
+    compactExerciseMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'nowrap' },
     compactControlDivider: { width: 1, alignSelf: 'stretch', backgroundColor: '#2D2D31', marginVertical: 2 },
-    compactStatGroup: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#161618', borderRadius: 10, paddingLeft: 10, paddingRight: 6, paddingVertical: 4 },
+    compactStatGroup: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#161618', borderRadius: 10, paddingLeft: 8, paddingRight: 5, paddingVertical: 3, flexShrink: 0 },
     compactStatLabel: { color: '#8A8A8A', fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
     compactNumberInput: { color: '#FFF', minWidth: 30, textAlign: 'center', fontSize: 15, fontWeight: '700', paddingVertical: 2, paddingHorizontal: 6 },
-    compactRestButton: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#161618', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8 },
+    compactRestButton: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#161618', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 6, flexShrink: 1, minWidth: 0 },
     compactRestButtonActive: { borderWidth: 1, borderColor: 'rgba(0,229,255,0.35)' },
-    compactRestText: { color: '#FFF', fontSize: 13, fontWeight: '700' },
+    compactRestText: { color: '#FFF', fontSize: 12, fontWeight: '700', flexShrink: 1 },
     compactControls: { flexDirection: 'row', alignItems: 'center', gap: 2 },
     compactIconBtn: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
     compactIconBtnDisabled: { opacity: 0.7 },
     compactDeleteBtn: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,68,68,0.08)' },
+    notesInput: { minHeight: 160 },
     
     freqToggleBlock: { flexDirection: 'row', gap: 12 },
     freqBtn: { flex: 1, backgroundColor: '#2C2C2E', padding: 16, borderRadius: 12, alignItems: 'center' },

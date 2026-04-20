@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { User, Activity, RefreshCw, Flame, Bell, Scale } from 'lucide-react-native';
-import { resetExercises, resetHistory, resetDatabase, resetBodyWeightEntries, getConfig, setConfig } from '../database/queries';
+import { resetExercises, resetHistory, resetDatabase, resetBodyWeightEntries, getConfig, setConfig, refreshScheduledGymDayNotification } from '../database/queries';
 import { useFocusEffect } from '@react-navigation/native';
 
 export const ProfileScreen = () => {
@@ -17,6 +17,7 @@ export const ProfileScreen = () => {
 
   const handleSaveGlobalNotif = (val: string) => {
     setConfig('notification_frequency', val);
+    void refreshScheduledGymDayNotification();
     setGlobalNotifSetting(val);
   };
 

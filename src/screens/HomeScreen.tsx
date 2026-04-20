@@ -64,10 +64,9 @@ import {
   AlertTriangle,
   Calendar,
   Check,
+  FileText,
 } from 'lucide-react-native';
 import {
-  updateWorkoutNotification,
-  clearWorkoutNotification,
   requestNotificationPermissions,
 } from '../utils/notifications';
 import { useFocusEffect } from '@react-navigation/native';
@@ -147,6 +146,8 @@ export const HomeScreen = () => {
   const [showBodyWeightHistory, setShowBodyWeightHistory] = useState(false);
   const [bodyWeightTimeframe, setBodyWeightTimeframe] = useState<'1m' | '3m' | '6m' | '1y' | 'all'>('all');
   const [bodyWeightTimeframePickerVisible, setBodyWeightTimeframePickerVisible] = useState(false);
+  const [editingExerciseNotesId, setEditingExerciseNotesId] = useState<number | null>(null);
+  const [exerciseNotesDraft, setExerciseNotesDraft] = useState('');
 
   const insets = useSafeAreaInsets();
 
@@ -157,6 +158,28 @@ export const HomeScreen = () => {
   const [restGoal, setRestGoal] = useState(0);
 
   const REST_OPTIONS = [0, 15, 30, 45, 60, 75, 90, 120, 150, 180, 240, 300];
+
+  const hydrateWorkoutExercise = React.useCallback((item: any) => {
+    const exercise = allExercises.find((ex) => ex.id === item.exerciseId);
+    if (!exercise) {
+      return {
+        ...item,
+        notes: item.notes ?? '',
+        rest_time: (item.rest_time ?? item.rest ?? 0).toString(),
+      };
+    }
+
+    return {
+      exerciseId: exercise.id,
+      name: item.name ?? exercise.name,
+      type: item.type ?? exercise.type,
+      sets: item.sets ?? '3',
+      reps: item.reps ?? (exercise.type === 'weight' ? '10' : ''),
+      ...item,
+      notes: item.notes ?? exercise.notes ?? '',
+      rest_time: (item.rest_time ?? item.rest ?? exercise.rest_time ?? 0).toString(),
+    };
+  }, [allExercises]);
 
   const [prevRest, setPrevRest] = useState(0);
   useEffect(() => {
@@ -305,6 +328,39 @@ export const HomeScreen = () => {
     }, [isActive]),
   );
 
+  const saveExerciseNotes = React.useCallback((exerciseId: number, nextNotes: string) => {
+    const exercise = allExercises.find((item) => item.id === exerciseId);
+    if (!exercise) return;
+
+    updateExercise(
+      exerciseId,
+      exercise.name,
+      exercise.type,
+      nextNotes.trim(),
+      exercise.muscles,
+      exercise.rest_time ?? 0,
+    );
+
+    const refreshedExercises = getExercises();
+    setAllExercises(refreshedExercises);
+    setTemplatePayload((prev) =>
+      prev.map((item) =>
+        item.exerciseId === exerciseId ? { ...item, notes: nextNotes.trim() } : item,
+      ),
+    );
+  }, [allExercises]);
+
+  const beginEditingExerciseNotes = React.useCallback((exerciseId: number, existingNotes: string) => {
+    setEditingExerciseNotesId(exerciseId);
+    setExerciseNotesDraft(existingNotes || '');
+  }, []);
+
+  const finishEditingExerciseNotes = React.useCallback((exerciseId: number) => {
+    saveExerciseNotes(exerciseId, exerciseNotesDraft);
+    setEditingExerciseNotesId(null);
+    setExerciseNotesDraft('');
+  }, [exerciseNotesDraft, saveExerciseNotes]);
+
   const fetchLiveProgress = () => {
     if (!sessionId) return;
     const sets = getSessionSets(sessionId);
@@ -324,7 +380,7 @@ export const HomeScreen = () => {
     setSearchQuery('');
 
     try {
-      const parsed = JSON.parse(template.exercises);
+      const parsed = JSON.parse(template.exercises).map((item: any) => hydrateWorkoutExercise(item));
       setTemplatePayload(parsed);
 
       let perfCache: { [key: number]: any[] } = {};
@@ -580,6 +636,7 @@ export const HomeScreen = () => {
         exerciseId: ex.id,
         name: ex.name,
         type: ex.type,
+        notes: ex.notes || '',
         sets: '3',
         reps: ex.type === 'weight' ? '10' : '',
         rest_time: (ex.rest_time ?? 0).toString(),
@@ -607,6 +664,7 @@ export const HomeScreen = () => {
         editingLibExerciseId,
         name.trim(),
         type,
+        '',
         JSON.stringify(muscles),
         0,
       );
@@ -656,7 +714,6 @@ export const HomeScreen = () => {
   const isGain = weightDelta > 0;
   const deltaColor = isGain ? '#88FF88' : (weightDelta < 0 ? '#FF4444' : '#A0A0A0');
   const deltaText = `${weightDelta > 0 ? '+' : ''}${weightDelta.toFixed(1)}kg`;
-
   let activeHUDStr = 'Routine Complete - Great Job!';
   if (isActive) {
     for (let i = 0; i < templatePayload.length; i++) {
@@ -675,18 +732,6 @@ export const HomeScreen = () => {
     }
   }
 
-  useEffect(() => {
-    if (isActive) {
-      if (restSecondsLeft > 0) {
-        updateWorkoutNotification(`Rest: ${formatTime(restSecondsLeft)}`, `Up Next: ${activeHUDStr}\nTotal Time: ${formatTime(accumulatedSeconds)}`);
-      } else {
-        updateWorkoutNotification(`Active: ${workoutName || 'Workout'}`, `Up Next: ${activeHUDStr}\nTotal Time: ${formatTime(accumulatedSeconds)}`);
-      }
-    } else {
-      clearWorkoutNotification();
-    }
-  }, [isActive, restSecondsLeft, accumulatedSeconds, activeHUDStr]);
-
   if (isActive) {
     const filteredExercises = allExercises.filter((ex) =>
       ex.name.toLowerCase().includes(searchQuery.toLowerCase()),
@@ -698,7 +743,11 @@ export const HomeScreen = () => {
       restGoal > 0 ? (restSecondsLeft / restGoal) * 100 : 0;
 
     return (
-      <View style={[styles.activeContainer, { paddingTop: insets.top }]}>
+      <KeyboardAvoidingView
+        style={[styles.activeContainer, { paddingTop: insets.top }]}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={insets.top}
+      >
         <View style={styles.liveHeader}>
           <View style={{ flex: 1 }}>
             <View
@@ -833,6 +882,31 @@ export const HomeScreen = () => {
                     </TouchableOpacity>
                   </View>
                 </View>
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => beginEditingExerciseNotes(target.exerciseId, target.notes || '')}
+                >
+                  <View style={[styles.exerciseNotesRow, !target.notes?.trim() && styles.exerciseNotesRowEmpty]}>
+                    <FileText color={target.notes?.trim() ? '#00E5FF' : '#5F5F65'} size={15} />
+                    {editingExerciseNotesId === target.exerciseId ? (
+                      <TextInput
+                        style={styles.exerciseNotesInput}
+                        value={exerciseNotesDraft}
+                        onChangeText={setExerciseNotesDraft}
+                        placeholder="No exercise notes"
+                        placeholderTextColor="#6F6F74"
+                        multiline
+                        autoFocus
+                        textAlignVertical="top"
+                        onBlur={() => finishEditingExerciseNotes(target.exerciseId)}
+                      />
+                    ) : (
+                      <Text style={[styles.exerciseNotesText, !target.notes?.trim() && styles.exerciseNotesPlaceholder]}>
+                        {target.notes?.trim() || 'No exercise notes'}
+                      </Text>
+                    )}
+                  </View>
+                </TouchableOpacity>
 
                 {/* Removed Absolute Inline Dropdown */}
 
@@ -949,6 +1023,10 @@ export const HomeScreen = () => {
         {/* Time Picker Modal */}
         <Modal visible={timePickerVisible} animationType="slide" transparent>
           <View style={styles.modalOverlaySecondary}>
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+              style={styles.modalKeyboardAvoiding}
+            >
             <View style={[styles.modalContent, { paddingBottom: 40 }]}>
               <View style={styles.modalHeaderRow}>
                 <Text style={styles.modalTitle}>Set Duration</Text>
@@ -998,6 +1076,7 @@ export const HomeScreen = () => {
                 <Text style={styles.primaryActionText}>Save Time</Text>
               </TouchableOpacity>
             </View>
+            </KeyboardAvoidingView>
           </View>
         </Modal>
 
@@ -1040,6 +1119,10 @@ export const HomeScreen = () => {
 
         <Modal visible={addModalVisible} animationType="slide" transparent>
           <View style={styles.modalOverlay}>
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+              style={styles.modalKeyboardAvoiding}
+            >
             <View style={styles.modalContent}>
               <View style={styles.modalHeaderRow}>
                 <Text style={styles.modalTitle}>Search Library</Text>
@@ -1110,6 +1193,7 @@ export const HomeScreen = () => {
                             <TouchableOpacity
                               onPress={() => handleInjectLiveExercise(item)}
                               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                              style={styles.exerciseSelectIconBtn}
                             >
                               <Plus color="#00E5FF" size={24} />
                             </TouchableOpacity>
@@ -1137,11 +1221,12 @@ export const HomeScreen = () => {
                 </ScrollView>
               )}
             </View>
+            </KeyboardAvoidingView>
           </View>
         </Modal>
 
 
-      </View>
+      </KeyboardAvoidingView>
     );
   }
 
@@ -1262,13 +1347,14 @@ export const HomeScreen = () => {
           </View>
 
           {filteredBodyWeightEntries.length > 1 ? (
+            <View style={styles.bodyWeightContentInset}>
             <View style={styles.bodyWeightChartFrame}>
               <LineChart
                 data={{
                   labels: filteredBodyWeightEntries.map(() => ''),
                   datasets: [{ data: filteredBodyWeightEntries.map((entry) => entry.weight_kg) }],
                 }}
-                width={SCREEN_WIDTH + 15}
+                width={SCREEN_WIDTH - 92}
                 height={160}
                 withDots
                 withInnerLines={false}
@@ -1303,18 +1389,21 @@ export const HomeScreen = () => {
                 style={styles.bodyWeightChart}
               />
             </View>
+            </View>
           ) : (
+            <View style={styles.bodyWeightContentInset}>
             <View style={styles.bodyWeightEmpty}>
               <TouchableOpacity
                 style={styles.bodyWeightFloatingAddBtn}
                 onPress={() => setBodyWeightModalVisible(true)}
               >
-                <Plus color="#FFF" size={16} />
+                <Plus color="#000" size={16} />
                 <Text style={styles.bodyWeightFloatingAddText}>Record Weight</Text>
               </TouchableOpacity>
               <Text style={styles.bodyWeightEmptyText}>
                 Add at least two weigh-ins to see your trend.
               </Text>
+            </View>
             </View>
           )}
 
@@ -1405,6 +1494,10 @@ export const HomeScreen = () => {
 
       <Modal visible={bodyWeightModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.modalKeyboardAvoiding}
+          >
           <View style={styles.modalContent}>
             <View style={styles.modalHeaderRow}>
               <Text style={styles.modalTitle}>Record Body Weight</Text>
@@ -1425,6 +1518,7 @@ export const HomeScreen = () => {
               <Text style={styles.bodyWeightSaveText}>Save Weight</Text>
             </TouchableOpacity>
           </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
 
@@ -1432,6 +1526,7 @@ export const HomeScreen = () => {
         visible={createExerciseModal}
         onClose={() => setCreateExerciseModal(false)}
         onSubmit={submitCreateExercise}
+        initialName={searchQuery.trim()}
         isEditing={!!editingLibExerciseId}
       />
     </View>
@@ -1580,6 +1675,40 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
     flex: 1,
+  },
+  exerciseNotesRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginTop: -2,
+    marginBottom: 12,
+    backgroundColor: '#171719',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: '#242428',
+  },
+  exerciseNotesRowEmpty: {
+    backgroundColor: '#131315',
+  },
+  exerciseNotesText: {
+    color: '#D8D8DD',
+    fontSize: 13,
+    lineHeight: 18,
+    flex: 1,
+    flexWrap: 'wrap',
+  },
+  exerciseNotesInput: {
+    color: '#D8D8DD',
+    fontSize: 13,
+    lineHeight: 18,
+    flex: 1,
+    paddingVertical: 0,
+    minHeight: 18,
+  },
+  exerciseNotesPlaceholder: {
+    color: '#6F6F74',
   },
   headerControls: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   inlineRestBtn: {
@@ -1736,6 +1865,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.95)',
     justifyContent: 'flex-end',
   },
+  modalKeyboardAvoiding: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
   modalContent: {
     backgroundColor: '#1C1C1E',
     borderTopLeftRadius: 24,
@@ -1795,6 +1928,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   exerciseSelectName: { color: '#FFF', fontSize: 16, flexShrink: 1 },
+  exerciseSelectIconBtn: { minWidth: 40, minHeight: 40, alignItems: 'center', justifyContent: 'center', marginRight: -4 },
 
   typeToggleRow: { flexDirection: 'row', gap: 12, marginBottom: 16 },
   typeToggleBtn: {
@@ -1967,26 +2101,32 @@ const styles = StyleSheet.create({
   },
   bwHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     padding: 20,
     paddingBottom: 0,
+    gap: 12,
   },
   bwTitle: {
     color: '#FFF',
     fontSize: 18,
     fontWeight: 'bold',
+    flexShrink: 1,
   },
   bwBadgesRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    marginLeft: 'auto',
   },
   bwBadgeBase: {
     backgroundColor: '#2C2C2E',
-    paddingHorizontal: 8,
+    paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 8,
+    flexShrink: 0,
   },
   bwBadgeTextBase: {
     color: '#E0E0E0',
@@ -2008,16 +2148,22 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 12,
   },
+  bodyWeightContentInset: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+  },
   bodyWeightChartFrame: {
     borderRadius: 24,
     overflow: 'hidden',
     backgroundColor: '#1C1C1E',
+    borderWidth: 1,
+    borderColor: '#242428',
   },
   bodyWeightChart: {
     borderRadius: 24,
-    marginLeft: -10,
-    marginBottom: -15,
-    marginTop: 10,
+    marginLeft: 0,
+    marginBottom: -6,
+    marginTop: 8,
   },
   bodyWeightEmpty: {
     backgroundColor: '#222225',
@@ -2026,7 +2172,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 220,
+    minHeight: 180,
+    borderWidth: 1,
+    borderColor: '#2B2B2F',
   },
   bodyWeightFloatingAddBtn: {
     flexDirection: 'row',

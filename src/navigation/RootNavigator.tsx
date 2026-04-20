@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { NavigationContainer, DarkTheme } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Keyboard, TextInput } from 'react-native';
 import { Home, User, BarChart2, ClipboardList, Activity } from 'lucide-react-native';
 
 const Tab = createBottomTabNavigator();
@@ -22,6 +22,15 @@ export const RootNavigator = () => {
       const interval = setInterval(() => { tick(); }, 1000);
       return () => clearInterval(interval);
   }, [isActive]);
+
+  useEffect(() => {
+      const subscription = Keyboard.addListener('keyboardDidHide', () => {
+          const focusedInput = TextInput.State.currentlyFocusedInput?.();
+          focusedInput?.blur?.();
+      });
+
+      return () => subscription.remove();
+  }, []);
 
   return (
     <NavigationContainer theme={DarkTheme}>
