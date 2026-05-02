@@ -1024,7 +1024,7 @@ export const HomeScreen = () => {
         <Modal visible={timePickerVisible} animationType="slide" transparent>
           <View style={styles.modalOverlaySecondary}>
             <KeyboardAvoidingView
-              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
               style={styles.modalKeyboardAvoiding}
             >
             <View style={[styles.modalContent, { paddingBottom: 40 }]}>
@@ -1120,7 +1120,7 @@ export const HomeScreen = () => {
         <Modal visible={addModalVisible} animationType="slide" transparent>
           <View style={styles.modalOverlay}>
             <KeyboardAvoidingView
-              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
               style={styles.modalKeyboardAvoiding}
             >
             <View style={styles.modalContent}>
@@ -1495,7 +1495,7 @@ export const HomeScreen = () => {
       <Modal visible={bodyWeightModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
             style={styles.modalKeyboardAvoiding}
           >
           <View style={styles.modalContent}>

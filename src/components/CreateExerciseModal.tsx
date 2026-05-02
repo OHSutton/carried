@@ -43,7 +43,7 @@ export const CreateExerciseModal: React.FC<CreateExerciseModalProps> = ({
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
       <View style={styles.modalOverlaySecondary}>
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.modalKeyboardAvoiding}
         >
         <View style={[styles.modalContent, { maxHeight: '75%' }]}>

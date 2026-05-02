@@ -357,7 +357,7 @@ export const WorkoutsScreen = () => {
             <Modal visible={templatesModalVisible} animationType="slide" transparent onRequestClose={handleCloseTemplateModal}>
                 <View style={styles.modalOverlay}>
                     <KeyboardAvoidingView
-                        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
                         style={styles.modalKeyboardAvoiding}
                     >
                     <View style={styles.modalContent}>
@@ -486,7 +486,7 @@ export const WorkoutsScreen = () => {
             <Modal visible={plansModalVisible} animationType="slide" transparent onRequestClose={() => setPlansModalVisible(false)}>
                 <View style={styles.modalOverlay}>
                     <KeyboardAvoidingView
-                        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
                         style={styles.modalKeyboardAvoiding}
                     >
                     <View style={styles.modalContent}>
@@ -606,7 +606,7 @@ export const WorkoutsScreen = () => {
             }}>
                 <View style={styles.modalOverlay}>
                     <KeyboardAvoidingView
-                        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
                         style={styles.modalKeyboardAvoiding}
                     >
                     <View style={styles.modalContent}>
